@@ -1,30 +1,31 @@
 import cv2
-from flask import Flask, render_template, Response
+import asyncio
+import websockets
+import base64
 
-app = Flask(__name__)
-cap = cv2.VideoCapture(0)  # 0은 기본 카메라를 나타냅니다.
+# 웹 소켓 서버 설정
+async def server(websocket, path):
+    cap = cv2.VideoCapture(0)
 
-def generate_frames():
-    while True:
-        success, frame = cap.read()  # 비디오 프레임 읽기
-        if not success:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
             break
-        else:
-            # 좌우 반전
-            frame = cv2.flip(frame, 1)
 
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')  # 프레임 전송
+        # 이미지 좌우 반전
+        frame = cv2.flip(frame, 1)
 
-@app.route('/')
-def index():
-    return render_template('templates/index.html')
+        # 이미지를 base64로 인코딩
+        _, img_encoded = cv2.imencode('.jpg', frame)
+        img_base64 = base64.b64encode(img_encoded.tobytes()).decode('utf-8')
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        # 웹 소켓으로 이미지 전송
+        await websocket.send(img_base64)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    cap.release()
+
+start_server = websockets.serve(server, "localhost", 8765)
+
+# 비동기 이벤트 루프 시작
+asyncio.get_event_loop().run_until_complete(start_server)
+asyncio.get_event_loop().run_forever()
